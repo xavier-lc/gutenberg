@@ -81,6 +81,7 @@ require __DIR__ . '/compat/wordpress-6.8/site-preview.php';
 // Experimental features.
 require __DIR__ . '/experimental/block-editor-settings-mobile.php';
 require __DIR__ . '/experimental/blocks.php';
+require __DIR__ . '/experimental/class-gutenberg-themes-controller.php';
 require __DIR__ . '/experimental/navigation-theme-opt-in.php';
 require __DIR__ . '/experimental/kses.php';
 require __DIR__ . '/experimental/l10n.php';
