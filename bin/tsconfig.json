@@ -4,7 +4,6 @@
 	"compilerOptions": {
 		"module": "node16",
 		"moduleResolution": "node16",
-		"esModuleInterop": true,
 		"target": "ES6",
 		"lib": [ "ES6", "ES2020.string" ],
 		"rootDir": ".",
@@ -32,8 +31,6 @@
 		"api-docs/gen-components-docs/markdown/props.mjs",
 		"api-docs/gen-theme-reference.mjs",
 		"build.mjs",
-		"check-licenses.mjs",
-		"check-local-changes.js",
 		"cherry-pick.mjs",
 		"commander.js",
 		"dev.mjs",
@@ -45,7 +42,6 @@
 		"plugin/cli.js",
 		"plugin/commands/common.js",
 		"plugin/commands/packages.js",
-		"plugin/lib/test/version.js",
-		"validate-tsconfig.mjs"
+		"plugin/lib/test/version.js"
 	]
 }

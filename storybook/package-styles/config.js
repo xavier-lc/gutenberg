@@ -59,6 +59,11 @@ const CONFIG = [
 		rtl: [ componentsRtl ],
 	},
 	{
+		componentIdMatcher: /^icons-/,
+		ltr: [ componentsLtr ],
+		rtl: [ componentsRtl ],
+	},
+	{
 		componentIdMatcher: /^dataviews-/,
 		ltr: [ designTokens, componentsLtr, dataviewsLtr ],
 		rtl: [ designTokens, componentsRtl, dataviewsRtl ],
@@ -69,9 +74,29 @@ const CONFIG = [
 		rtl: [ componentsRtl, dataviewsRtl, fieldsRtl, mediaFieldsRtl ],
 	},
 	{
+		componentIdMatcher: /^admin-ui-/,
+		ltr: [ designTokens, componentsLtr ],
+		rtl: [ designTokens, componentsRtl ],
+	},
+	{
+		componentIdMatcher: /^grid-/,
+		ltr: [ designTokens ],
+		rtl: [ designTokens ],
+	},
+	{
+		componentIdMatcher: /^mediaeditor-/,
+		ltr: [ componentsLtr ],
+		rtl: [ componentsRtl ],
+	},
+	{
 		componentIdMatcher: /^design-system-/,
 		ltr: [ designTokens ],
 		rtl: [ designTokens ],
+	},
+	{
+		componentIdMatcher: /^design-system-patterns-/,
+		ltr: [ componentsLtr, dataviewsLtr ],
+		rtl: [ componentsRtl, dataviewsRtl ],
 	},
 ];
 

@@ -62,6 +62,7 @@ import { isExternalImage } from './edit';
 import { Caption } from '../utils/caption';
 import { MediaControl } from '../utils/media-control';
 import { useToolsPanelDropdownMenuProps } from '../utils/hooks';
+import { useOpenImageMediaEditorModal } from './use-open-image-media-editor-modal';
 import {
 	MIN_SIZE,
 	ALLOWED_MEDIA_TYPES,
@@ -70,7 +71,9 @@ import {
 } from './constants';
 import { evalAspectRatio, mediaPosition } from './utils';
 
-const { DimensionsTool, ResolutionTool } = unlock( blockEditorPrivateApis );
+const { DimensionsTool, ResolutionTool, mediaEditKey } = unlock(
+	blockEditorPrivateApis
+);
 
 const scaleOptions = [
 	{
@@ -258,6 +261,7 @@ function ContentOnlyControls( {
 
 export default function Image( {
 	temporaryURL,
+	isSideloading,
 	attributes,
 	setAttributes,
 	isSingleSelected,
@@ -310,7 +314,7 @@ export default function Image( {
 	const setRefs = useMergeRefs( [ setImageElement, setResizeObserved ] );
 	const { allowResize = true } = context;
 
-	const { image, canUserEdit } = useSelect(
+	const { image, attachmentResolutionError } = useSelect(
 		( select ) => {
 			const imageRecord =
 				id && isSingleSelected
@@ -322,31 +326,38 @@ export default function Image( {
 					  )
 					: null;
 
-			// Check edit permissions. When the media editor experiment is enabled,
-			// use getEntityRecordPermissions which checks via canUser API.
-			// Only check when the image is selected to avoid unnecessary API requests.
-			let canEdit = false;
-			if ( id && isSingleSelected && window?.__experimentalMediaEditor ) {
-				const { getEntityRecordPermissions } = unlock(
-					select( coreStore )
-				);
-				const permissions = getEntityRecordPermissions(
-					'postType',
-					'attachment',
-					id
-				);
-				canEdit = permissions?.update || false;
-			}
+			// Check if the attachment resolution failed with a specific error.
+			// We use getResolutionError instead of hasFinishedResolution so we
+			// can distinguish 404 (attachment doesn't exist) from transient
+			// errors (500, 403, network) that shouldn't clear the id.
+			const resolutionError =
+				id && isSingleSelected
+					? select( coreStore ).getResolutionError(
+							'getEntityRecord',
+							[
+								'postType',
+								'attachment',
+								id,
+								{ context: 'view' },
+							]
+					  )
+					: null;
 
 			return {
 				image: imageRecord,
-				canUserEdit: canEdit,
+				attachmentResolutionError: resolutionError,
 			};
 		},
 		[ id, isSingleSelected ]
 	);
 
-	const { canInsertCover, imageEditing, imageSizes, maxWidth } = useSelect(
+	const {
+		canInsertCover,
+		imageEditing,
+		imageSizes,
+		maxWidth,
+		editMediaEntity,
+	} = useSelect(
 		( select ) => {
 			const { getBlockRootClientId, canInsertBlockType, getSettings } =
 				select( blockEditorStore );
@@ -358,6 +369,7 @@ export default function Image( {
 				imageEditing: settings.imageEditing,
 				imageSizes: settings.imageSizes,
 				maxWidth: settings.maxWidth,
+				editMediaEntity: settings?.[ mediaEditKey ],
 				canInsertCover: canInsertBlockType(
 					'core/cover',
 					rootClientId
@@ -367,9 +379,16 @@ export default function Image( {
 		[ clientId ]
 	);
 	const { getBlock, getSettings } = useSelect( blockEditorStore );
-	const onNavigateToEntityRecord = getSettings().onNavigateToEntityRecord;
+	const openImageMediaEditorModal = useOpenImageMediaEditorModal( {
+		attributes,
+		setAttributes,
+	} );
 
-	const { replaceBlocks, toggleSelection } = useDispatch( blockEditorStore );
+	const {
+		replaceBlocks,
+		toggleSelection,
+		__unstableMarkNextChangeAsNotPersistent,
+	} = useDispatch( blockEditorStore );
 	const { createErrorNotice, createSuccessNotice } =
 		useDispatch( noticesStore );
 	const { editEntityRecord } = useDispatch( coreStore );
@@ -391,11 +410,42 @@ export default function Image( {
 		hasNonContentControls &&
 		! isWideAligned &&
 		isLargeViewport;
+	// An image is uploading if it has a temporary blob URL, or if it is
+	// being processed client-side (e.g. transcoded or generating sub-sizes).
+	const isUploading = !! temporaryURL || isSideloading;
 	const imageSizeOptions = imageSizes
 		.filter(
 			( { slug } ) => image?.media_details?.sizes?.[ slug ]?.source_url
 		)
 		.map( ( { name, slug } ) => ( { value: slug, label: name } ) );
+
+	// If the image has an id but the attachment doesn't exist on this site,
+	// clear the id so Gutenberg treats the image as external.
+	// This handles content copied between WordPress sites.
+	//
+	// Known limitation: if a different attachment with the same id happens to
+	// exist on the destination site, the lookup will succeed and the wrong
+	// local image will be used. URL matching could address this in a follow-up.
+	// See: https://github.com/WordPress/gutenberg/issues/74156
+	useEffect( () => {
+		if ( ! id || ! isSingleSelected ) {
+			return;
+		}
+		// Only clear for confirmed 404s. apiFetch throws the Response object
+		// for HTTP errors, so checking .status === 404 avoids incorrectly
+		// clearing the id on 403, 500, or network failures, which would
+		// cause data loss for valid local attachments.
+		if ( attachmentResolutionError?.status === 404 ) {
+			__unstableMarkNextChangeAsNotPersistent();
+			setAttributes( { id: undefined } );
+		}
+	}, [
+		id,
+		isSingleSelected,
+		attachmentResolutionError,
+		setAttributes,
+		__unstableMarkNextChangeAsNotPersistent,
+	] );
 
 	// If an image is externally hosted, try to fetch the image data. This may
 	// fail if the image host doesn't allow CORS with the domain. If it works,
@@ -527,6 +577,7 @@ export default function Image( {
 		if ( ! mediaUpload ) {
 			return;
 		}
+		let notified = false;
 		mediaUpload( {
 			filesList: [ externalBlob ],
 			onFileChange( [ img ] ) {
@@ -536,10 +587,15 @@ export default function Image( {
 					return;
 				}
 
-				setExternalBlob();
-				createSuccessNotice( __( 'Image uploaded.' ), {
-					type: 'snackbar',
-				} );
+				// With client-side media processing, onFileChange fires
+				// for each generated sub-size. Only show the notice once.
+				if ( ! notified ) {
+					notified = true;
+					setExternalBlob();
+					createSuccessNotice( __( 'Image uploaded.' ), {
+						type: 'snackbar',
+					} );
+				}
 			},
 			allowedTypes: ALLOWED_MEDIA_TYPES,
 			onError( message ) {
@@ -554,7 +610,12 @@ export default function Image( {
 		}
 	}, [ isSingleSelected ] );
 
-	const canEditImage = id && naturalWidth && naturalHeight && imageEditing;
+	const canEditImage =
+		id &&
+		naturalWidth &&
+		naturalHeight &&
+		imageEditing &&
+		!! editMediaEntity;
 	const allowCrop =
 		isSingleSelected &&
 		canEditImage &&
@@ -762,27 +823,6 @@ export default function Image( {
 	const hasDataFormBlockFields =
 		window?.__experimentalContentOnlyInspectorFields;
 
-	const editMediaButton = window?.__experimentalMediaEditor &&
-		id &&
-		isSingleSelected &&
-		canUserEdit &&
-		! isExternalImage( id, url ) &&
-		! isEditingImage &&
-		onNavigateToEntityRecord && (
-			<BlockControls group="other">
-				<ToolbarButton
-					onClick={ () => {
-						onNavigateToEntityRecord( {
-							postId: id,
-							postType: 'attachment',
-						} );
-					} }
-				>
-					{ __( 'Edit media' ) }
-				</ToolbarButton>
-			</BlockControls>
-		);
-
 	const controls = (
 		<>
 			{ showBlockControls && (
@@ -805,7 +845,14 @@ export default function Image( {
 					) }
 					{ allowCrop && (
 						<ToolbarButton
-							onClick={ () => setIsEditingImage( true ) }
+							onClick={
+								openImageMediaEditorModal
+									? openImageMediaEditorModal
+									: () => setIsEditingImage( true )
+							}
+							aria-haspopup={
+								openImageMediaEditorModal ? 'dialog' : undefined
+							}
 							icon={ crop }
 							label={ __( 'Crop' ) }
 						/>
@@ -874,7 +921,7 @@ export default function Image( {
 									onSelectURL={ onSelectURL }
 									onError={ onUploadError }
 									onReset={ () => onSelectImage( undefined ) }
-									isUploading={ !! temporaryURL }
+									isUploading={ isUploading }
 									emptyLabel={ __( 'Add image' ) }
 								/>
 							</ToolsPanelItem>
@@ -1055,7 +1102,33 @@ export default function Image( {
 									height:
 										pixelSize.height + resizeDelta.height,
 							  }
-							: { width, height } ),
+							: ( () => {
+									const style = {};
+									if ( width === 'auto' ) {
+										style.width = 'auto';
+									} else if (
+										width !== undefined &&
+										width !== null
+									) {
+										style.width =
+											typeof width === 'number'
+												? `${ width }px`
+												: width;
+									}
+									if (
+										height === 'auto' ||
+										height === undefined ||
+										height === null
+									) {
+										style.height = 'auto';
+									} else {
+										style.height =
+											typeof height === 'number'
+												? `${ height }px`
+												: height;
+									}
+									return style;
+							  } )() ),
 						objectFit: scale,
 						objectPosition:
 							focalPoint && scale
@@ -1065,7 +1138,7 @@ export default function Image( {
 						...shadowProps.style,
 					} }
 				/>
-				{ temporaryURL && <Spinner /> }
+				{ isUploading && <Spinner /> }
 			</>
 		);
 
@@ -1097,6 +1170,7 @@ export default function Image( {
 		isResizable &&
 		isSingleSelected &&
 		! isEditingImage &&
+		! isUploading &&
 		! SIZED_LAYOUTS.includes( parentLayoutType )
 	) {
 		const numericRatio = aspectRatio && evalAspectRatio( aspectRatio );
@@ -1238,25 +1312,23 @@ export default function Image( {
 		} );
 	};
 
-	const featuredImageControl = (
-		<BlockSettingsMenuControls>
-			{ ( { selectedClientIds } ) =>
-				selectedClientIds.length === 1 &&
-				! isDescendentOfQueryLoop &&
-				postId &&
-				id &&
-				clientId === selectedClientIds[ 0 ] && (
-					<MenuItem onClick={ setPostFeatureImage }>
-						{ __( 'Set as featured image' ) }
-					</MenuItem>
-				)
-			}
-		</BlockSettingsMenuControls>
-	);
+	const featuredImageControl =
+		! isDescendentOfQueryLoop && postId && id ? (
+			<BlockSettingsMenuControls>
+				{ ( { canEdit, selectedClientIds } ) =>
+					canEdit &&
+					selectedClientIds.length === 1 &&
+					clientId === selectedClientIds[ 0 ] && (
+						<MenuItem onClick={ setPostFeatureImage }>
+							{ __( 'Set as featured image' ) }
+						</MenuItem>
+					)
+				}
+			</BlockSettingsMenuControls>
+		) : null;
 
 	return (
 		<>
-			{ editMediaButton }
 			{ mediaReplaceFlow }
 			{ controls }
 			{ featuredImageControl }

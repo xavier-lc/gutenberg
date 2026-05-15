@@ -12,10 +12,9 @@ import { privateApis as routerPrivateApis } from '@wordpress/router';
 import { useSelect } from '@wordpress/data';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 import { privateApis as editorPrivateApis } from '@wordpress/editor';
-import { __ } from '@wordpress/i18n';
 import { useEvent, usePrevious } from '@wordpress/compose';
 import { addQueryArgs } from '@wordpress/url';
-import { useView } from '@wordpress/views';
+import { useView, useViewConfig } from '@wordpress/views';
 
 /**
  * Internal dependencies
@@ -34,11 +33,7 @@ import {
 	useEditPostAction,
 	useQuickEditPostAction,
 } from '../dataviews-actions';
-import {
-	defaultLayouts,
-	DEFAULT_VIEW,
-	getActiveViewOverridesForTab,
-} from './view-utils';
+
 import useNotesCount from './use-notes-count';
 import { QuickEditModal } from './quick-edit-modal';
 
@@ -61,16 +56,25 @@ export default function PostList( { postType } ) {
 	const { path, query } = useLocation();
 	const { activeView = 'all', postId, quickEdit = false } = query;
 	const history = useHistory();
-	const defaultView = DEFAULT_VIEW;
+	const {
+		default_view: defaultView,
+		default_layouts: defaultLayouts,
+		view_list: viewList,
+		form: quickEditForm,
+	} = useViewConfig( {
+		kind: 'postType',
+		name: postType,
+	} );
 	const activeViewOverrides = useMemo(
-		() => getActiveViewOverridesForTab( activeView ),
-		[ activeView ]
+		() => viewList?.find( ( v ) => v.slug === activeView )?.view ?? {},
+		[ viewList, activeView ]
 	);
 	const { view, updateView, isModified, resetToDefault } = useView( {
 		kind: 'postType',
 		name: postType,
 		slug: 'default',
 		defaultView,
+		defaultLayouts,
 		activeViewOverrides,
 		queryParams: {
 			page: query.pageNumber,
@@ -171,6 +175,7 @@ export default function PostList( { postType } ) {
 		isResolving: isLoadingData,
 		totalItems,
 		totalPages,
+		hasResolved,
 	} = useEntityRecordsWithPermissions( 'postType', postType, queryArgs );
 
 	const postIds = useMemo(
@@ -246,11 +251,6 @@ export default function PostList( { postType } ) {
 	const editAction = useEditPostAction();
 	const quickEditAction = useQuickEditPostAction();
 	const actions = useMemo( () => {
-		if ( ! window.__experimentalQuickEditDataViews ) {
-			const editActionPrimary = { ...editAction, isPrimary: true };
-			return [ editActionPrimary, ...postTypeActions ];
-		}
-
 		if ( view.type === LAYOUT_LIST ) {
 			const editActionPrimary = { ...editAction, isPrimary: true };
 			return [ editActionPrimary, ...postTypeActions ];
@@ -279,24 +279,15 @@ export default function PostList( { postType } ) {
 	return (
 		<Page
 			title={ labels?.name }
+			headingLevel={ 2 }
 			actions={
 				<>
-					{ isModified && (
-						<Button
-							__next40pxDefaultSize
-							onClick={ () => {
-								resetToDefault();
-								history.invalidate();
-							} }
-						>
-							{ __( 'Reset view' ) }
-						</Button>
-					) }
 					{ labels?.add_new_item && canCreateRecord && (
 						<>
 							<Button
 								variant="primary"
 								onClick={ openModal }
+								size="compact"
 								__next40pxDefaultSize
 							>
 								{ labels.add_new_item }
@@ -319,7 +310,9 @@ export default function PostList( { postType } ) {
 				fields={ fields }
 				actions={ actions }
 				data={ data || EMPTY_ARRAY }
-				isLoading={ isLoadingData || isLoadingNotesCount }
+				isLoading={
+					isLoadingData || isLoadingNotesCount || ! hasResolved
+				}
 				view={ view }
 				onChangeView={ onChangeView }
 				selection={ selection }
@@ -331,14 +324,26 @@ export default function PostList( { postType } ) {
 				getItemId={ getItemId }
 				getItemLevel={ getItemLevel }
 				defaultLayouts={ defaultLayouts }
+				onReset={
+					isModified
+						? () => {
+								resetToDefault();
+								history.invalidate();
+						  }
+						: false
+				}
 			/>
-			{ quickEdit && ! isLoadingData && selection.length > 0 && (
-				<QuickEditModal
-					postType={ postType }
-					postId={ selection }
-					closeModal={ closeQuickEditModal }
-				/>
-			) }
+			{ quickEdit &&
+				! isLoadingData &&
+				selection.length > 0 &&
+				view.type !== LAYOUT_LIST && (
+					<QuickEditModal
+						postType={ postType }
+						postId={ selection }
+						closeModal={ closeQuickEditModal }
+						quickEditForm={ quickEditForm }
+					/>
+				) }
 		</Page>
 	);
 }

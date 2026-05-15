@@ -7,7 +7,7 @@ import {
 } from '@wordpress/components';
 import warning from '@wordpress/warning';
 import deprecated from '@wordpress/deprecated';
-import { useEffect, useContext } from '@wordpress/element';
+import { useEffect, useContext, useMemo } from '@wordpress/element';
 
 /**
  * Internal dependencies
@@ -16,8 +16,14 @@ import {
 	useBlockEditContext,
 	mayDisplayControlsKey,
 	mayDisplayPatternEditingControlsKey,
+	isInListViewBlockSupportTreeKey,
 } from '../block-edit/context';
 import groups from './groups';
+import {
+	scopeResetAllFilterToState,
+	useBlockStyleState,
+} from '../../hooks/block-style-state';
+import { ListViewContentFill } from './list-view-content-popover';
 
 const PATTERN_EDITING_GROUPS = [ 'content', 'list' ];
 const TEMPLATE_PART_GROUPS = [ 'default', 'settings', 'advanced' ];
@@ -41,6 +47,7 @@ export default function InspectorControlsFill( {
 	}
 
 	const context = useBlockEditContext();
+
 	const Fill = groups[ group ]?.Fill;
 	if ( ! Fill ) {
 		warning( `Unknown InspectorControls group "${ group }" provided.` );
@@ -74,6 +81,26 @@ export default function InspectorControlsFill( {
 		return null;
 	}
 
+	// When inside a section with a parent that has ListView block support,
+	// content controls are rendered as part of the ListView via a popover.
+	if (
+		group === 'content' &&
+		!! context[ isInListViewBlockSupportTreeKey ] &&
+		!! context[ mayDisplayPatternEditingControlsKey ]
+	) {
+		if ( context[ mayDisplayControlsKey ] ) {
+			return (
+				<StyleProvider document={ document }>
+					<ListViewContentFill>{ children }</ListViewContentFill>
+				</StyleProvider>
+			);
+		}
+
+		// When using the ListView fill, only render controls for the selected
+		// block. Other blocks return `null`.
+		return null;
+	}
+
 	return (
 		<StyleProvider document={ document }>
 			<Fill>
@@ -94,18 +121,27 @@ export default function InspectorControlsFill( {
 function RegisterResetAll( { resetAllFilter, children } ) {
 	const { registerResetAllFilter, deregisterResetAllFilter } =
 		useContext( ToolsPanelContext );
+	const selectedState = useBlockStyleState();
+	const scopedResetAllFilter = useMemo(
+		() => scopeResetAllFilterToState( selectedState, resetAllFilter ),
+		[ resetAllFilter, selectedState ]
+	);
 	useEffect( () => {
 		if (
-			resetAllFilter &&
+			scopedResetAllFilter &&
 			registerResetAllFilter &&
 			deregisterResetAllFilter
 		) {
-			registerResetAllFilter( resetAllFilter );
+			registerResetAllFilter( scopedResetAllFilter );
 			return () => {
-				deregisterResetAllFilter( resetAllFilter );
+				deregisterResetAllFilter( scopedResetAllFilter );
 			};
 		}
-	}, [ resetAllFilter, registerResetAllFilter, deregisterResetAllFilter ] );
+	}, [
+		scopedResetAllFilter,
+		registerResetAllFilter,
+		deregisterResetAllFilter,
+	] );
 	return children;
 }
 

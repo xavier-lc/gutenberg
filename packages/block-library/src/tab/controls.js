@@ -1,61 +1,19 @@
 /**
  * WordPress dependencies
  */
-import {
-	InspectorControls,
-	store as blockEditorStore,
-} from '@wordpress/block-editor';
-import { PanelBody, TextControl, CheckboxControl } from '@wordpress/components';
-import { __ } from '@wordpress/i18n';
-import { useDispatch } from '@wordpress/data';
-import { decodeEntities } from '@wordpress/html-entities';
+import { BlockControls } from '@wordpress/block-editor';
 
 /**
  * Internal dependencies
  */
-import AddTabToolbarControl from './add-tab-toolbar-control';
-import RemoveTabToolbarControl from './remove-tab-toolbar-control';
-import slugFromLabel from './slug-from-label';
+import AddTabToolbarControl from '../tab-panel/add-tab-toolbar-control';
+import RemoveTabToolbarControl from '../tab-panel/remove-tab-toolbar-control';
 
-export default function Controls( {
-	attributes,
-	setAttributes,
-	tabsClientId,
-	blockIndex,
-	isDefaultTab,
-} ) {
-	const { label } = attributes;
-
-	const { updateBlockAttributes } = useDispatch( blockEditorStore );
-
+export default function Controls( { tabsClientId } ) {
 	return (
-		<>
+		<BlockControls>
 			<AddTabToolbarControl tabsClientId={ tabsClientId } />
 			<RemoveTabToolbarControl tabsClientId={ tabsClientId } />
-			<InspectorControls>
-				<PanelBody title={ __( 'Settings' ) }>
-					<TextControl
-						label={ __( 'Label' ) }
-						value={ decodeEntities( label ) }
-						onChange={ ( value ) => {
-							setAttributes( {
-								label: value,
-								anchor: slugFromLabel( value, blockIndex ),
-							} );
-						} }
-						__next40pxDefaultSize
-					/>
-					<CheckboxControl
-						label={ __( 'Default tab' ) }
-						checked={ isDefaultTab }
-						onChange={ ( value ) => {
-							updateBlockAttributes( tabsClientId, {
-								activeTabIndex: value ? blockIndex : 0,
-							} );
-						} }
-					/>
-				</PanelBody>
-			</InspectorControls>
-		</>
+		</BlockControls>
 	);
 }

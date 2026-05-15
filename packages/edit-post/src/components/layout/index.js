@@ -12,7 +12,6 @@ import {
 	LocalAutosaveMonitor,
 	UnsavedChangesWarning,
 	EditorKeyboardShortcutsRegister,
-	EditorSnackbars,
 	ErrorBoundary,
 	PostLockedModal,
 	store as editorStore,
@@ -31,7 +30,7 @@ import {
 	useState,
 } from '@wordpress/element';
 import { chevronDown, chevronUp } from '@wordpress/icons';
-import { store as noticesStore } from '@wordpress/notices';
+import { SnackbarNotices, store as noticesStore } from '@wordpress/notices';
 import { store as preferencesStore } from '@wordpress/preferences';
 import { privateApis as commandsPrivateApis } from '@wordpress/commands';
 import { privateApis as blockLibraryPrivateApis } from '@wordpress/block-library';
@@ -42,7 +41,6 @@ import {
 	Icon,
 	SlotFillProvider,
 	Tooltip,
-	VisuallyHidden,
 	__unstableUseNavigateRegions as useNavigateRegions,
 	privateApis as componentsPrivateApis,
 } from '@wordpress/components';
@@ -52,6 +50,7 @@ import {
 	useRefEffect,
 	useViewportMatch,
 } from '@wordpress/compose';
+import { VisuallyHidden } from '@wordpress/ui';
 
 /**
  * Internal dependencies
@@ -134,7 +133,7 @@ function useEditorStyles( settings ) {
 
 /**
  * @param {Object}  props
- * @param {boolean} props.isLegacy True when the editor canvas is not in an iframe.
+ * @param {boolean} props.isLegacy True for device previews where split view is disabled.
  */
 function MetaBoxesMain( { isLegacy } ) {
 	const [ isOpen, openHeight, hasAnyVisible ] = useSelect( ( select ) => {
@@ -195,6 +194,11 @@ function MetaBoxesMain( { isLegacy } ) {
 	const separatorHelpId = useId();
 
 	const heightRef = useRef();
+
+	const getAriaValueNow = ( height ) =>
+		Math.round( ( ( height - min ) / ( max - min ) ) * 100 );
+	const persistIsOpen = ( to = ! isOpen ) =>
+		setPreference( 'core/edit-post', 'metaBoxesMainIsOpen', to );
 
 	/**
 	 * @param {number|'auto'} [candidateHeight] Height in pixels or 'auto'.
@@ -295,13 +299,8 @@ function MetaBoxesMain( { isLegacy } ) {
 	const usedOpenHeight = isShort ? 'auto' : openHeight;
 	const usedHeight = isOpen ? usedOpenHeight : min;
 
-	const getAriaValueNow = ( height ) =>
-		Math.round( ( ( height - min ) / ( max - min ) ) * 100 );
 	const usedAriaValueNow =
 		max === undefined || isAutoHeight ? 50 : getAriaValueNow( usedHeight );
-
-	const persistIsOpen = ( to = ! isOpen ) =>
-		setPreference( 'core/edit-post', 'metaBoxesMainIsOpen', to );
 
 	const paneLabel = __( 'Meta Boxes' );
 
@@ -330,7 +329,7 @@ function MetaBoxesMain( { isLegacy } ) {
 	const separator = ! isShort && (
 		<>
 			<Tooltip text={ __( 'Drag to resize' ) }>
-				<button // eslint-disable-line jsx-a11y/role-supports-aria-props
+				<button
 					ref={ separatorRef }
 					role="separator" // eslint-disable-line jsx-a11y/no-interactive-element-to-noninteractive-role
 					aria-valuenow={ usedAriaValueNow }
@@ -349,7 +348,7 @@ function MetaBoxesMain( { isLegacy } ) {
 
 	return (
 		<NavigableRegion
-			aria-label={ paneLabel }
+			ariaLabel={ paneLabel }
 			ref={ setMainRefs }
 			className={ clsx(
 				'edit-post-meta-boxes-main',
@@ -379,7 +378,6 @@ function Layout( {
 		currentPost: { postId: currentPostId, postType: currentPostType },
 		onNavigateToEntityRecord,
 		onNavigateToPreviousEntityRecord,
-		previousSelectedBlockPath,
 	} = useNavigateToEntityRecord(
 		initialPostId,
 		initialPostType,
@@ -474,7 +472,6 @@ function Layout( {
 			styles,
 			onNavigateToEntityRecord,
 			onNavigateToPreviousEntityRecord,
-			defaultRenderingMode: 'post-only',
 		} ),
 		[
 			settings,
@@ -577,11 +574,7 @@ function Layout( {
 		<SlotFillProvider>
 			<ErrorBoundary canCopyContent>
 				<WelcomeGuide postType={ currentPostType } />
-				<div
-					className={ navigateRegionsProps.className }
-					{ ...navigateRegionsProps }
-					ref={ navigateRegionsProps.ref }
-				>
+				<div { ...navigateRegionsProps }>
 					<Editor
 						settings={ editorSettings }
 						initialEdits={ initialEdits }
@@ -595,18 +588,13 @@ function Layout( {
 						// eslint-disable-next-line jsx-a11y/no-autofocus
 						autoFocus={ ! isWelcomeGuideVisible }
 						onActionPerformed={ onActionPerformed }
-						initialSelection={ previousSelectedBlockPath }
 						extraSidebarPanels={
 							showMetaBoxes && <MetaBoxes location="side" />
 						}
 						extraContent={
 							! isDistractionFree &&
 							showMetaBoxes && (
-								<MetaBoxesMain
-									isLegacy={
-										! shouldIframe || isDevicePreview
-									}
-								/>
+								<MetaBoxesMain isLegacy={ isDevicePreview } />
 							)
 						}
 					>
@@ -626,7 +614,7 @@ function Layout( {
 						<PluginArea onError={ onPluginAreaError } />
 						<PostEditorMoreMenu />
 						{ backButton }
-						<EditorSnackbars />
+						<SnackbarNotices className="edit-post-layout__snackbar" />
 					</Editor>
 				</div>
 			</ErrorBoundary>
